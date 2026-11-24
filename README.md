@@ -1,7 +1,7 @@
 # Shard Log
 
 Every shard you have in one Cyber Engine Tweaks window, newest first, with search and a reading pane, for Cyberpunk 2077. Single-player only.
-Version 1.0.0 | For game version 2.5 | Status: not run in game yet; redscript compiles and the offline mock test passes (136 of 136 checks)
+Version 1.0.0 | For game version 2.5 | Status: runs in my game, lightly used so far; no written test record; redscript compiles and the offline mock test passes (136 of 136 checks)
 
 > This is an unofficial fan work and is not approved/endorsed by CD PROJEKT RED. No game files are included.
 
@@ -61,7 +61,7 @@ The selected tab, sort order (newest first or A to Z) and category are remembere
 
 | What | Result |
 |---|---|
-| In game, 1.0.0 | Not run in game. Its test list (sort order and time labels, a newly looted shard on top, read and unread in sync with the journal, search in shard texts, encrypted shards) is still open. |
+| In game, 1.0.0 | Runs in the author's game, lightly used so far (author's statement, 2026-11-24). No written test record. Its test list (sort order and time labels, a newly looted shard on top, read and unread in sync with the journal, search in shard texts, encrypted shards) is still open. |
 | Compile | redscript compiles with 0 errors against the full installed script set; the 6 warnings are the same as without the mod. |
 | Mock test | 136 of 136 checks pass with LuaJIT. The test covers the ImGui push/pop balance every frame, tabs, sort, the category list, search including the delayed text search, mark read and unread, the New tab keeping just-read shards, encrypted rows, change detection, error back-off, the main menu, a missing redscript part, a collapsed window, 407 shards and the config file. It runs in CI. |
 
@@ -73,7 +73,7 @@ The selected tab, sort order (newest first or A to Z) and category are remembere
 
 ## Known issues
 
-- The journal calls follow the 2.5 game scripts and have not been tried in game. If the journal callback does not fire for this kind of system, the window still re-reads on every overlay open and every 30 seconds. A failing call shows a red line in the window and one line in the mod's log; the game keeps running.
+- The journal calls follow the 2.5 game scripts; the mod has only been lightly used in game, with no written test record. If the journal callback does not fire for this kind of system, the window still re-reads on every overlay open and every 30 seconds. A failing call shows a red line in the window and one line in the mod's log; the game keeps running.
 
 ## Engineering notes
 
