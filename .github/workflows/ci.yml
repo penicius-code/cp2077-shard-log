@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  lua:
+    name: Lua syntax (LuaJIT, as used by Cyber Engine Tweaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y luajit
+      - name: Compile every Lua file (syntax only)
+        run: |
+          set -e
+          find . -name '*.lua' -not -path './.git/*' -print0 | while IFS= read -r -d '' f; do
+            echo "checking $f"
+            luajit -bl "$f" > /dev/null
+          done
+      - name: Run the mock test (the game API is replaced by stubs)
+        run: |
+          cd "$(mktemp -d)"
+          luajit "$GITHUB_WORKSPACE/tests/mock.lua" "$GITHUB_WORKSPACE/package/bin/x64/plugins/cyber_engine_tweaks/mods/CyberslopShardLog/init.lua"
+
+  yaml:
+    name: YAML syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install yamllint
+      - run: |
+          yamllint -d "{extends: relaxed, rules: {line-length: disable, indentation: disable, empty-lines: disable, trailing-spaces: disable, new-line-at-end-of-file: disable}}" .
