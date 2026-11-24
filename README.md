@@ -3,6 +3,8 @@
 Every shard you have in one Cyber Engine Tweaks window, newest first, with search and a reading pane, for Cyberpunk 2077. Single-player only.
 Version 1.0.0 | For game version 2.5 | Status: runs in my game, lightly used so far; no written test record; redscript compiles and the offline mock test passes (136 of 136 checks)
 
+**Download:** [latest release](https://github.com/penicius-code/cp2077-shard-log/releases/latest) (zip; install steps below)
+
 > This is an unofficial fan work and is not approved/endorsed by CD PROJEKT RED. No game files are included.
 
 ## The problem
@@ -44,7 +46,7 @@ No other mod is needed. Requirements are not bundled.
 ## Install
 
 1. Install the requirements above.
-2. Copy the contents of `package/` into the game folder, so that `r6\scripts\CyberslopShardLog\CyberslopShardLog.reds` exists.
+2. Download the zip from the [latest release](https://github.com/penicius-code/cp2077-shard-log/releases/latest) (the same files as `package/` in this repository) and extract it into the game folder, so that `r6\scripts\CyberslopShardLog\CyberslopShardLog.reds` exists.
 3. Start the game, load a save and open the CET overlay. The "Shard Log" window lists your shards. In the main menu it says "Load a save to see your shards."
 
 ## Uninstall / roll back
