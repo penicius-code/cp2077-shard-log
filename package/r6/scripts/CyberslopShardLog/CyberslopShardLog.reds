@@ -1,4 +1,4 @@
-// Cyberslop Shard Log 1.0.0 - redscript half of the CET window "Shard Log".
+// Cyberslop Shard Log 1.1.0 - redscript half of the CET window "Shard Log".
 //
 // Refresh() reads what the journal's Shards screen lists (CodexUtils.GetShardsDataArray: JournalManager.GetOnscreens,
 // active entries, fallback group "others") plus the encrypted shards in V's inventory (ShardsMenuGameController
@@ -12,14 +12,24 @@
 //
 // Generation() goes up whenever a shard entry changes state or read flag (journal callbacks State + Visited), so the
 // CET window re-reads only after a change.
+//
+// 1.1.0 audio: Shard Audio Framework plays an AudioXL sound named after the shard's text key ("LocKey#1234", pack
+// Shard_Audio_Pack_Official_English). PlayAudio / StopAudio do the same from the CET window. The framework's state
+// class is not public, so the CET side keeps its "last key / stopped" fields in step (AudioKey + StopSound are for
+// that). Without AudioXL the audio calls compile to no-ops.
+
+@if(ModuleExists("AudioXL"))
+import AudioXL.*
 
 public class CyberslopShardLogSystem extends ScriptableSystem {
   private let m_gen: Int32;
   private let m_journal: wref<JournalManager>;
   private let m_hashes: array<Int32>;
   private let m_times: array<Int32>;
-  private let m_flags: array<Int32>;   // 1 unread, 2 encrypted, 4 Phantom Liberty
+  private let m_flags: array<Int32>;   // 1 unread, 2 encrypted, 4 Phantom Liberty, 8 has a voice recording
   private let m_groups: array<Int32>;  // index into GroupNames()
+  private let m_audioHash: Int32;      // shard whose recording this window started (0 = none)
+  private let m_audioName: CName;
 
   public static func Get(game: GameInstance) -> ref<CyberslopShardLogSystem> {
     return GameInstance.GetScriptableSystemsContainer(game).Get(n"CyberslopShardLogSystem") as CyberslopShardLogSystem;
@@ -152,6 +162,9 @@ public class CyberslopShardLogSystem extends ScriptableSystem {
             if journal.IsEp1Entry(shard) {
               flags += 4;
             }
+            if CyberslopShardLogSystem.AxHas(CyberslopShardLogSystem.KeyName(shard.GetDescription())) {
+              flags += 8;
+            }
             this.Add(journal.GetEntryHash(shard), GameTime.GetSeconds(journal.GetEntryTimestamp(shard)), flags, gi);
           }
         }
@@ -262,6 +275,132 @@ public class CyberslopShardLogSystem extends ScriptableSystem {
       i += 1;
     }
     return result;
+  }
+
+  // ---------------------------------------------------------------- audio (1.1.0)
+
+  @if(ModuleExists("AudioXL"))
+  private static func AxHas(name: CName) -> Bool {
+    return IsNameValid(name) && AudioXLNative.Has(name);
+  }
+
+  @if(!ModuleExists("AudioXL"))
+  private static func AxHas(name: CName) -> Bool {
+    return false;
+  }
+
+  @if(ModuleExists("AudioXL"))
+  private static func AxStop(name: CName) -> Void {
+    if IsNameValid(name) {
+      AudioXLNative.Stop(name, 0.0);
+    }
+  }
+
+  @if(!ModuleExists("AudioXL"))
+  private static func AxStop(name: CName) -> Void {}
+
+  @if(ModuleExists("AudioXL"))
+  private static func AxPlaying(name: CName) -> Bool {
+    return IsNameValid(name) && AudioXLNative.IsPlaying(name);
+  }
+
+  @if(!ModuleExists("AudioXL"))
+  private static func AxPlaying(name: CName) -> Bool {
+    return false;
+  }
+
+  @if(ModuleExists("AudioXL"))
+  private static func AxPosition(name: CName) -> Float {
+    return AudioXLNative.Position(name);
+  }
+
+  @if(!ModuleExists("AudioXL"))
+  private static func AxPosition(name: CName) -> Float {
+    return 0.0;
+  }
+
+  @if(ModuleExists("AudioXL"))
+  private static func AxDuration(name: CName) -> Float {
+    return AudioXLNative.Duration(name);
+  }
+
+  @if(!ModuleExists("AudioXL"))
+  private static func AxDuration(name: CName) -> Float {
+    return 0.0;
+  }
+
+  // Sound name of a shard text key ("LocKey#1234"), as Shard Audio Framework builds it.
+  private static func KeyName(key: String) -> CName {
+    if !IsStringValid(key) {
+      return n"";
+    }
+    return StringToName(key);
+  }
+
+  // Raw text key of a readable shard; empty for an encrypted or unknown one.
+  public func AudioKey(hash: Int32) -> String {
+    let e = this.Entry(hash);
+    if !IsDefined(e) {
+      return "";
+    }
+    let journal = GameInstance.GetJournalManager(this.GetGameInstance());
+    if Equals(journal.GetEntryState(e), gameJournalEntryState.Inactive) {
+      return "";
+    }
+    return e.GetDescription();
+  }
+
+  public func HasAudio(hash: Int32) -> Bool {
+    return CyberslopShardLogSystem.AxHas(CyberslopShardLogSystem.KeyName(this.AudioKey(hash)));
+  }
+
+  // Stops the recording this window started, then plays this shard's.
+  public func PlayAudio(hash: Int32) -> Bool {
+    let key = this.AudioKey(hash);
+    let name = CyberslopShardLogSystem.KeyName(key);
+    if !CyberslopShardLogSystem.AxHas(name) {
+      return false;
+    }
+    this.StopAudio();
+    CyberslopShardLogSystem.AxStop(name);
+    GameInstance.GetAudioSystem(this.GetGameInstance()).Play(name);
+    this.m_audioHash = hash;
+    this.m_audioName = name;
+    return true;
+  }
+
+  public func StopAudio() -> Void {
+    CyberslopShardLogSystem.AxStop(this.m_audioName);
+    this.m_audioHash = 0;
+    this.m_audioName = n"";
+  }
+
+  // Stops a recording by its text key (the one Shard Audio Framework's journal button started).
+  public func StopSound(key: String) -> Void {
+    CyberslopShardLogSystem.AxStop(CyberslopShardLogSystem.KeyName(key));
+  }
+
+  // Hash of the shard whose recording (started here) is audible right now, 0 if none.
+  public func AudioPlaying() -> Int32 {
+    if this.m_audioHash != 0 && CyberslopShardLogSystem.AxPlaying(this.m_audioName) {
+      return this.m_audioHash;
+    }
+    return 0;
+  }
+
+  // Seconds played / total length of the recording started here (0 when unknown).
+  public func AudioPosition() -> Float {
+    if this.m_audioHash == 0 {
+      return 0.0;
+    }
+    return CyberslopShardLogSystem.AxPosition(this.m_audioName);
+  }
+
+  public func AudioLength() -> Float {
+    if this.m_audioHash == 0 {
+      return 0.0;
+    }
+    return CyberslopShardLogSystem.AxDuration(this.m_audioName);
   }
 
   // Sets the journal's read flag (the Shards screen's NEW marker). Returns false for an unknown hash.

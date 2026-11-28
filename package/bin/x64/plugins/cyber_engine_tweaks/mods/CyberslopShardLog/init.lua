@@ -1,17 +1,20 @@
--- Cyberslop Shard Log 1.0.0 (2026-11-23)
+-- Cyberslop Shard Log 1.1.0 (2026-11-25)
 -- Every shard V has, in one CET window, newest first: no categories to click through like the journal's Shards
 -- screen. Tabs All / New (unread) / Encrypted, category filter, search (title instantly, shard text a moment later),
 -- sort Newest / A-Z. A row shows the title, the category and how long ago (game time) the shard went into the
 -- journal. Click a row: the text in the reading pane; that marks the shard read in the journal too (the journal does
 -- the same when you select a shard). Mark unread / read button. No "mark all read": quest mods read that flag
 -- (DedraLucy Part Two picks a branch by whether V read its shards), so only shards V opens get marked.
+-- 1.1.0: shards with a voice recording (Shard Audio Framework + its AudioXL pack) carry an AUDIO tag; the reading
+-- pane gets PLAY AUDIO / STOP AUDIO, and while a recording plays the bottom line shows it with a STOP button, so you
+-- can keep browsing. Playing goes through the redscript system (same sound the framework's journal button plays).
 -- The journal reads live in r6\scripts\CyberslopShardLog\CyberslopShardLog.reds (CyberslopShardLogSystem).
 -- Cost: no onUpdate, no hooks, no keys. onDraw returns at once while the CET overlay is closed. While it is open and
 -- the window expanded: one change check every 0.5 s (a counter the redscript side bumps on shard journal changes),
 -- a full re-read after a change, on every overlay open and every 30 s; titles cached per shard; only the rows inside
 -- the scroll view are drawn.
 
-local VERSION = "1.0.0"
+local VERSION = "1.1.0"
 local SYS_NAME = "CyberslopShardLogSystem"
 local CONFIG = "config.json"
 local POLL = 0.5          -- s between change checks while the overlay is open
@@ -20,6 +23,8 @@ local SEARCH_DELAY = 0.25 -- s after the last key before the shard texts are sea
 local WIDE = 820          -- content width from which the reading pane sits beside the list
 local CUT = 9             -- cut corner of rows and chips, px
 local TITLE_SCALE = 1.08
+local AUDIO_GRACE = 1.5   -- s after PLAY before "not playing" is believed (the mp3 starts from disk)
+local SAF_NAME = "ShardAudioFramework.SAFStateSystem"
 local G_ENC = 11          -- group index of encrypted shards (redscript GroupNames order)
 
 local TAB_ALL, TAB_NEW, TAB_ENC = 1, 2, 3
@@ -73,6 +78,7 @@ local S = {
     groupNames = nil, groupCount = {}, groupLabel = {}, allLabel = "ALL CATEGORIES",
     search = "", searchLower = "", matchSet = nil, searchDue = nil,
     selected = nil, det = nil, readNow = {}, errMsg = nil, lastErr = nil, sortW = nil, comboW = nil,
+    audio = nil, -- { hash, title, t0, len, label } while a recording started here plays
 }
 local agoCache, rowIds = {}, {}
 local palFlat = nil
@@ -229,10 +235,12 @@ local function refresh(sys, now)
         r.unread = f % 2 == 1
         r.enc = math.floor(f / 2) % 2 == 1
         r.ep1 = math.floor(f / 4) % 2 == 1
+        local voiced = math.floor(f / 8) % 2 == 1
         local g = G[i] or 10
-        if r.group ~= g or not r.sub then
+        if r.group ~= g or r.voiced ~= voiced or not r.sub then
             r.group = g
-            r.sub = groupName(g) .. (r.ep1 and "  |  PHANTOM LIBERTY" or "")
+            r.voiced = voiced
+            r.sub = groupName(g) .. (r.ep1 and "  |  PHANTOM LIBERTY" or "") .. (voiced and "  |  AUDIO" or "")
         end
         r.ts = T[i] or 0
         r.ago, r.agoW = agoOf(r.ts)
@@ -251,7 +259,86 @@ local function refresh(sys, now)
     S.needFull = false
 end
 
+-- ---------------------------------------------------------------- audio
+
+local function mmss(sec)
+    sec = math.floor(sec)
+    return string.format("%d:%02d", math.floor(sec / 60), sec % 60)
+end
+
+local function audioLabel(a, pos)
+    local s = "PLAYING: " .. a.title
+    if a.len and a.len > 0 then
+        if pos < 0 then pos = 0 elseif pos > a.len then pos = a.len end
+        s = s .. "   " .. mmss(pos) .. " / " .. mmss(a.len)
+    end
+    a.label = s
+end
+
+-- Shard Audio Framework keeps "last key / stopped" in its own system (not reachable from redscript: the class is
+-- not public). Kept in step here so its journal button and phone messages act on the recording started here, and
+-- STOP here also ends one its journal button started. Best effort: without it play / stop still work.
+local function safSync(sys, key)
+    local ok, err = pcall(function()
+        local sc = Game.GetScriptableSystemsContainer()
+        local saf = sc and sc:Get(SAF_NAME)
+        if not valid(saf) then return end
+        if key then
+            saf.m_lastLockeyStr = key
+            saf.m_lastLockeyName = CName.new(key)
+            saf.m_stopped = false
+        else
+            local last = saf.m_lastLockeyStr
+            if type(last) == "string" and last ~= "" then sys:StopSound(last) end
+            saf.m_stopped = true
+        end
+    end)
+    if not ok and not S.safErr then
+        S.safErr = true
+        logLine("Shard Audio Framework state not synced: " .. tostring(err))
+    end
+end
+
+local function stopAudio()
+    local sys = getSys()
+    if not sys then return end
+    sys:StopAudio()
+    safSync(sys, nil)
+    S.audio = nil
+end
+
+local function playAudio(r)
+    local sys = getSys()
+    if not sys or not r then return end
+    safSync(sys, nil) -- ends a recording the journal button started
+    if sys:PlayAudio(r.hash) then
+        local a = { hash = r.hash, title = r.title, t0 = os.clock(), len = sys:AudioLength() or 0 }
+        audioLabel(a, 0)
+        S.audio = a
+        safSync(sys, sys:AudioKey(r.hash))
+    else
+        S.audio = nil
+        S.errMsg = "Shard Log: no recording for this shard (AudioXL / Shard Audio pack missing?)"
+    end
+end
+
+local function pollAudio(sys, now)
+    local a = S.audio
+    local h = sys:AudioPlaying() or 0
+    if h ~= 0 then
+        if not a or a.hash ~= h then
+            local r = S.byHash[h]
+            a = { hash = h, title = r and r.title or "shard", t0 = now - AUDIO_GRACE, len = sys:AudioLength() or 0 }
+            S.audio = a
+        end
+        audioLabel(a, sys:AudioPosition() or 0)
+    elseif a and now - a.t0 >= AUDIO_GRACE then
+        S.audio = nil
+    end
+end
+
 local function clearAll()
+    S.audio = nil
     S.rows, S.det, S.selected, S.view = {}, nil, nil, {}
     S.byHash = {}
     S.gen = -1
@@ -276,6 +363,7 @@ local function poll(now)
     elseif S.searchDue and now >= S.searchDue then
         runSearch(sys)
     end
+    pollAudio(sys, now)
 end
 
 -- ---------------------------------------------------------------- actions
@@ -594,6 +682,19 @@ local function drawDetails()
             if ImGui.Button("MARK UNREAD##csl_mr") then markRead(r, false) end
         end
         ImGui.SameLine(0, 6)
+        if r.voiced then
+            if S.audio and S.audio.hash == r.hash then
+                ImGui.PushStyleColor(ImGuiCol.Button, 0.42, 0.1, 0.09, 0.95)
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, 0.62, 0.15, 0.13, 1)
+                local hit = ImGui.Button("STOP AUDIO##csl_au")
+                ImGui.PopStyleColor(2)
+                if hit then stopAudio() end
+            else
+                if ImGui.Button("PLAY AUDIO##csl_au") then playAudio(r) end
+            end
+            if ImGui.IsItemHovered() then ImGui.SetTooltip("Voice recording of this shard. It keeps playing while you browse.") end
+            ImGui.SameLine(0, 6)
+        end
     end
     if ImGui.Button("CLOSE##csl_dc") then
         S.selected, S.det = nil, nil
@@ -670,7 +771,17 @@ local function drawBody()
     else
         listChild(0, availH - footH)
     end
-    ImGui.TextDisabled("Click a shard to read it. Times are game time since it went into the journal.")
+    local a = S.audio
+    if a then
+        if ImGui.SmallButton("STOP##csl_as") then
+            stopAudio()
+        else
+            ImGui.SameLine(0, 8)
+            ImGui.TextColored(0.98, 0.83, 0.12, 1, a.label)
+        end
+    else
+        ImGui.TextDisabled("Click a shard to read it. Times are game time since it went into the journal.")
+    end
 end
 
 local function pushPalette()
