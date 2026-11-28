@@ -8,7 +8,7 @@ For game version 2.5.
 - A recording started from the journal button is stopped first, and the framework's own state is kept in step, so its journal button, phone messages and "stop on phone call" act on the recording started here.
 - The audio code is behind `@if(ModuleExists("AudioXL"))`: without AudioXL the mod compiles and shows no audio buttons.
 
-Not run in game yet.
+Not run in game yet. Mock test: 196 of 196.
 
 ## 1.0.0 - 2026-11-23
 - First version: every shard in one window, newest first, with All / New / Encrypted tabs, a category filter, search over titles and texts, a reading pane, and mark read / unread.

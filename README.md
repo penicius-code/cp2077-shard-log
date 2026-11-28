@@ -28,7 +28,7 @@ One list of every shard, sorted by when it went into the journal, with tabs, a c
 package/
   bin/x64/plugins/cyber_engine_tweaks/mods/CyberslopShardLog/init.lua   the window
   r6/scripts/CyberslopShardLog/CyberslopShardLog.reds                   journal reads
-tests/mock.lua    runs the Lua against a stubbed game API (136 checks)
+tests/mock.lua    runs the Lua against a stubbed game API (196 checks)
 ```
 
 Run the test from an empty folder, because it writes the mod's settings file into the current folder: `luajit <repo>/tests/mock.lua <repo>/package/bin/x64/plugins/cyber_engine_tweaks/mods/<mod folder>/init.lua`.
@@ -67,7 +67,7 @@ The selected tab, sort order (newest first or A to Z) and category are remembere
 | In game, 1.0.0 | Runs in the author's game, lightly used so far (author's statement, 2026-11-24). No written test record. Its test list (sort order and time labels, a newly looted shard on top, read and unread in sync with the journal, search in shard texts, encrypted shards) is still open. |
 | In game, 1.1.0 | Not run in game yet. Unchecked: that AudioXL's `IsPlaying` and `Position` report these recordings correctly (the bottom line and the button state depend on them), and the CET write to the Shard Audio Framework's state fields. |
 | Compile | redscript compiles with 0 errors against the full installed script set; the 6 warnings are the same as without the mod. |
-| Mock test | 136 of 136 checks pass with LuaJIT. The test covers the ImGui push/pop balance every frame, tabs, sort, the category list, search including the delayed text search, mark read and unread, the New tab keeping just-read shards, encrypted rows, change detection, error back-off, the main menu, a missing redscript part, a collapsed window, 407 shards and the config file. It runs in CI. |
+| Mock test | 196 of 196 checks pass with LuaJIT (1.1.0; 1.0.0 had 136), also in CI. 1.1.0 adds checks for the audio tag, play, stop and the playing line. The test covers the ImGui push/pop balance every frame, tabs, sort, the category list, search including the delayed text search, mark read and unread, the New tab keeping just-read shards, encrypted rows, change detection, error back-off, the main menu, a missing redscript part, a collapsed window, 407 shards and the config file. It runs in CI. |
 
 ## Compatibility
 

@@ -89,11 +89,37 @@ function SYS:MarkRead(h, read)
     self.gen = self.gen + 1
     return true
 end
+-- audio (1.1.0): flag 8 = voiced; key = "LocKey#<abs hash>"
+local AUD = { playing = nil, pos = 0, len = 65, sounds = {} } -- sounds[key] = true while audible
+local function keyOf(h) return "LocKey#" .. math.abs(h) end
+function SYS:AudioKey(h) local s = find(h); if not s or s[5] % 4 >= 2 then return "" end; return keyOf(h) end
+function SYS:HasAudio(h) local s = find(h); return s ~= nil and s[5] % 16 >= 8 end
+function SYS:PlayAudio(h)
+    CALLS[#CALLS + 1] = "play:" .. h
+    if not self:HasAudio(h) then return false end
+    if AUD.playing then AUD.sounds[keyOf(AUD.playing)] = nil end
+    AUD.playing, AUD.pos = h, 0
+    AUD.sounds[keyOf(h)] = true
+    return true
+end
+function SYS:StopAudio()
+    CALLS[#CALLS + 1] = "stop"
+    if AUD.playing then AUD.sounds[keyOf(AUD.playing)] = nil end
+    AUD.playing = nil
+end
+function SYS:StopSound(key) CALLS[#CALLS + 1] = "stopsound:" .. key; AUD.sounds[key] = nil end
+function SYS:AudioPlaying() if AUD.playing and AUD.sounds[keyOf(AUD.playing)] and not AUD.starting then return AUD.playing end; return 0 end
+function SYS:AudioPosition() return AUD.pos end
+function SYS:AudioLength() return AUD.playing and AUD.len or 0 end
+local SAF = { m_lastLockeyStr = "", m_lastLockeyName = nil, m_stopped = true }
+local safPresent = true
+CName = { new = function(s) return { cname = s } end }
 local sysPresent, inGame = true, true
 local PLAYER = {}
 Game = {
     GetPlayer = function() return inGame and PLAYER or nil end,
     GetScriptableSystemsContainer = function() return { Get = function(self, name)
+        if name == "ShardAudioFramework.SAFStateSystem" then return safPresent and SAF or nil end
         assert(name == "CyberslopShardLogSystem", "system name")
         return sysPresent and SYS or nil
     end } end,
@@ -129,6 +155,7 @@ function Im.InvisibleButton(id, w, h)
 end
 function Im.IsItemHovered() return IN.hover ~= nil and IN.hover == lastItem end
 function Im.Button(label) lastItem = label; if not quiet then F.buttons[#F.buttons + 1] = label end; return IN.click == label end
+function Im.SmallButton(label) lastItem = label; if not quiet then F.buttons[#F.buttons + 1] = label end; return IN.click == label end
 function Im.InputTextWithHint(id, hint, text, n) lastItem = id; if IN.input then local t = IN.input; IN.input = nil; return t, true end; return text, false end
 function Im.TextWrapped(s) assert(type(s) == "string", "TextWrapped string"); lastItem = s; if not quiet then F.wrapped[#F.wrapped + 1] = s end end
 function Im.TextDisabled(s) lastItem = s; if not quiet then F.disabled[#F.disabled + 1] = s end end
@@ -475,6 +502,119 @@ collectgarbage("restart")
 io.stdout:write(string.format("garbage per open-overlay frame (407 shards): %.3f KB\n", perFrame))
 ok(perFrame < 0.5, "T19 per-frame garbage below 0.5 KB")
 quiet = false
+
+-- ------------------------------------------------------------ audio tests (1.1.0)
+local function hasPrefix(list, pre) for _, v in ipairs(list) do if v:sub(1, #pre) == pre then return v end end return nil end
+for i = #SH, 1, -1 do SH[i] = nil end
+SH[1] = { 201, "Voiced Memo", "spoken words", 9000, 8, 2 }
+SH[2] = { 202, "Silent Note", "quiet", 8000, 0, 4 }
+SH[3] = { 203, "Voiced Poem", "spoken roses", 7000, 8 + 4, 9 }
+SH[4] = { 204, "Locked Voice", "SECRET", -1, 3, 11 }
+function SYS:MarkRead(h, read) return true end
+frame({ click = "A-Z##csl_sort" })
+SYS.gen = SYS.gen + 1
+NOW = NOW + 1
+frame()
+f = frame()
+-- A1 AUDIO tag on voiced rows only
+ok(has(f.texts, "WORLD  |  AUDIO") and has(f.texts, "POETRY  |  PHANTOM LIBERTY  |  AUDIO") and has(f.texts, "NOTES"), "A1 AUDIO tag on voiced rows")
+ok(has(f.disabled, "Click a shard to read it. Times are game time since it went into the journal."), "A1 footer hint while silent")
+-- A2 silent shard: no audio button
+r = rowOf(f, "Silent Note")
+frame({ click = r, hover = r })
+f = frame()
+ok(has(f.wrapped, "Silent Note") and not hasPrefix(f.buttons, "PLAY AUDIO") and not hasPrefix(f.buttons, "STOP"), "A2 silent shard has no audio button")
+-- A3 voiced shard: PLAY AUDIO; click plays, syncs the framework, shows STOP + now-playing line
+r = rowOf(f, "Voiced Memo")
+frame({ click = r, hover = r })
+f = frame()
+ok(has(f.buttons, "PLAY AUDIO##csl_au") and not has(f.buttons, "STOP##csl_as"), "A3 PLAY AUDIO on a voiced shard")
+clearCalls()
+AUD.starting = true -- the sound is not audible yet (file starting)
+frame({ click = "PLAY AUDIO##csl_au" })
+ok(callsStr() == "play:201", "A3 play call (" .. callsStr() .. ")")
+ok(SAF.m_lastLockeyStr == "LocKey#201" and SAF.m_lastLockeyName.cname == "LocKey#201" and SAF.m_stopped == false, "A3 framework state synced on play")
+NOW = NOW + 0.6
+f = frame()
+ok(has(f.buttons, "STOP AUDIO##csl_au") and has(f.buttons, "STOP##csl_as"), "A3 stays playing through the start grace")
+AUD.starting = false
+AUD.pos = 12.4
+NOW = NOW + 0.6
+frame()
+f = frame()
+ok(has(f.colored, "PLAYING: Voiced Memo   0:12 / 1:05"), "A3 now-playing line with time (" .. tostring(hasPrefix(f.colored, "PLAYING")) .. ")")
+ok(not has(f.disabled, "Click a shard to read it. Times are game time since it went into the journal."), "A3 footer hint replaced")
+-- A4 browse to another shard: audio keeps playing, its pane offers PLAY, footer STOP still there
+r = rowOf(f, "Voiced Poem")
+frame({ click = r, hover = r })
+f = frame()
+ok(AUD.playing == 201 and has(f.buttons, "PLAY AUDIO##csl_au") and has(f.buttons, "STOP##csl_as"), "A4 keeps playing while browsing")
+frame({ click = "CLOSE##csl_dc" })
+f = frame()
+ok(AUD.playing == 201 and has(f.buttons, "STOP##csl_as"), "A4 CLOSE does not stop the audio")
+-- A5 switch: play the other one
+r = rowOf(f, "Voiced Poem")
+frame({ click = r, hover = r })
+clearCalls()
+frame({ click = "PLAY AUDIO##csl_au" })
+NOW = NOW + 2
+frame()
+f = frame()
+ok(AUD.playing == 203 and not AUD.sounds["LocKey#201"] and hasPrefix(f.colored, "PLAYING: Voiced Poem") ~= nil, "A5 switched to the other recording")
+ok(SAF.m_lastLockeyStr == "LocKey#203", "A5 framework key follows")
+-- A6 footer STOP
+clearCalls()
+frame({ click = "STOP##csl_as" })
+f = frame()
+ok(AUD.playing == nil and SAF.m_stopped == true and not has(f.buttons, "STOP##csl_as") and has(f.buttons, "PLAY AUDIO##csl_au"), "A6 footer STOP stops (" .. callsStr() .. ")")
+-- A7 pane STOP AUDIO
+frame({ click = "PLAY AUDIO##csl_au" })
+f = frame()
+ok(has(f.buttons, "STOP AUDIO##csl_au"), "A7 STOP AUDIO shown")
+frame({ click = "STOP AUDIO##csl_au" })
+f = frame()
+ok(AUD.playing == nil and has(f.buttons, "PLAY AUDIO##csl_au"), "A7 STOP AUDIO stops")
+-- A8 recording ends by itself: line goes away after the next poll
+frame({ click = "PLAY AUDIO##csl_au" })
+NOW = NOW + 2
+frame()
+AUD.sounds = {}
+NOW = NOW + 0.6
+frame()
+f = frame()
+ok(not has(f.buttons, "STOP##csl_as") and has(f.buttons, "PLAY AUDIO##csl_au"), "A8 ended recording clears the line")
+AUD.playing = nil
+-- A9 a recording the journal button started is stopped before ours plays
+SAF.m_lastLockeyStr, SAF.m_stopped = "LocKey#999", false
+AUD.sounds["LocKey#999"] = true
+clearCalls()
+frame({ click = "PLAY AUDIO##csl_au" })
+ok(callsStr() == "stopsound:LocKey#999,play:203" and not AUD.sounds["LocKey#999"], "A9 journal-started recording stopped first (" .. callsStr() .. ")")
+-- A10 overlay closed and reopened while playing: line comes back; closing does not stop the audio
+handlers.onOverlayClose()
+handlers.onOverlayOpen()
+f = frame()
+ok(AUD.playing == 203 and has(f.buttons, "STOP##csl_as"), "A10 still playing after reopening the overlay")
+-- A11 no framework: play / stop still work
+safPresent = false
+frame({ click = "STOP##csl_as" })
+ok(AUD.playing == nil, "A11 stop without the framework")
+frame({ click = "PLAY AUDIO##csl_au" })
+ok(AUD.playing == 203, "A11 play without the framework")
+safPresent = true
+-- A12 pack gone (PlayAudio false): message, no playing state
+function SYS:PlayAudio(h) return false end
+frame({ click = "STOP##csl_as" })
+frame({ click = "PLAY AUDIO##csl_au" })
+f = frame()
+ok(hasPrefix(f.colored, "Shard Log: no recording") ~= nil and not has(f.buttons, "STOP##csl_as"), "A12 failed play reported")
+-- A13 main menu clears the playing line
+inGame = false
+NOW = NOW + 1
+f = frame()
+ok(not has(f.buttons, "STOP##csl_as"), "A13 main menu: no audio line")
+inGame = true
+for _, l in ipairs(logs) do if l:find("not synced") then ok(false, "framework sync error logged: " .. l) end end
 
 ok(errs() == 1, "no unexpected errors (" .. errs() .. ")")
 for _, l in ipairs(logs) do if l:find("error") and not l:find("journal exploded") then io.stdout:write("LOG: " .. l .. "\n") end end
